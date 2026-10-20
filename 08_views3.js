@@ -367,21 +367,56 @@ VIEWS.profile = () => {
 const CT_KINDS = [['student', 'Student Contributors'], ['faculty', 'Faculty Mentors'], ['other', 'Other Contributors']];
 const ctInitials = n => String(n || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
-/* Show the saved image if it loads; otherwise fall back to initials. */
-function ctPhotoHTML(c) {
+/* Photo: a static asset path (c.img) wins, then an uploaded photo (c.photo). If the image fails, log it and show a subtle initials fallback. */
+function ctPhotoHTML(c, cls = 'ct-photo') {
   const initials = esc(ctInitials(c.name));
   const name = esc(c.name || 'Contributor');
-  const photo = typeof c.photo === 'string' ? c.photo.trim() : '';
+  const src = (typeof c.img === 'string' && c.img.trim()) || (typeof c.photo === 'string' ? c.photo.trim() : '');
 
-  if (!photo) {
-    return `<div class="ct-photo"><div class="ct-initials" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
+  if (!src) {
+    return `<div class="${cls}"><div class="ct-initials" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
   }
 
-  return `<div class="ct-photo"><img src="${esc(photo)}" alt="${name}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="ct-initials" style="display:none;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
+  return `<div class="${cls}"><img src="${esc(src)}" alt="${name}" style="width:100%;height:100%;object-fit:cover" onerror="console.error('Contributor image failed to load:',this.getAttribute('src'));this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="ct-initials" style="display:none;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
 }
 
 function ctCardHTML(c) {
-  return `<div class="ct-card">${ctPhotoHTML(c)}<h3 style="margin:0">${esc(c.name)}</h3>${c.role ? `<p class="small"><b>${esc(c.role)}</b></p>` : ''}${c.regNo ? `<span class="chip acc">Register No: ${esc(c.regNo)}</span>` : ''}${c.dept ? `<span class="xs muted">${esc(c.dept)}</span>` : ''}${c.desc ? `<p class="small muted" style="margin-top:6px">${esc(c.desc)}</p>` : ''}</div>`;
+  const kind = c.kind === 'faculty' ? 'faculty' : 'student';
+  return `<div class="card ct2-card ct2-${kind}">${ctPhotoHTML(c, 'ct2-photo')}<div class="ct2-body"><h3>${esc(c.name)}</h3>${c.role ? `<p class="ct2-role">${esc(c.role)}</p>` : ''}${c.regNo ? `<span class="chip acc">Register No: ${esc(c.regNo)}</span>` : ''}${c.dept ? `<span class="xs muted">${esc(c.dept)}</span>` : ''}${c.desc ? `<p class="small muted ct2-desc">${esc(c.desc)}</p>` : ''}</div></div>`;
+}
+
+/* Styles for the redesigned Contributors view (injected once; scoped to ct2- classes so nothing else is affected). */
+function ctInjectStyle() {
+  if (document.getElementById('ct2-style')) return;
+  const st = document.createElement('style'); st.id = 'ct2-style';
+  st.textContent = `
+.ct2-wrap{max-width:1040px;margin:0 auto}
+.ct2-group{margin:0 0 34px}
+.ct2-h{display:flex;align-items:center;gap:12px;margin:0 0 14px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ct2-h::after{content:"";flex:1;height:1px;background:var(--line2,rgba(128,128,128,.3))}
+.ct2-students{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:stretch}
+.ct2-card{display:flex;flex-direction:column;padding:14px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.ct2-photo{width:100%;aspect-ratio:4/5;overflow:hidden;border-radius:8px;background:rgba(128,128,128,.12);flex:none}
+.ct2-photo img{display:block;object-position:center 20%}
+.ct2-photo .ct-initials{font-size:34px;font-weight:600;color:var(--muted);opacity:.7}
+.ct2-body{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 4px 4px}
+.ct2-body h3{margin:0;font-size:18px;line-height:1.3}
+.ct2-role{margin:0;font-size:14px;font-weight:600}
+.ct2-desc{margin:2px 0 0}
+.ct2-faculty{flex-direction:row;gap:22px;max-width:720px;margin:0 auto;padding:18px;border-left:4px solid var(--accent)}
+.ct2-faculty .ct2-photo{width:200px}
+.ct2-faculty .ct2-body{padding:6px 0;justify-content:center}
+.ct2-faculty .ct2-body h3{font-size:21px}
+.ct2-others{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
+@media (max-width:900px){.ct2-students{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){
+  .ct2-students{grid-template-columns:1fr}
+  .ct2-students .ct2-card{max-width:340px;width:100%;margin:0 auto}
+  .ct2-faculty{flex-direction:column;align-items:center;text-align:center}
+  .ct2-faculty .ct2-photo{width:100%;max-width:240px}
+  .ct2-faculty .ct2-body{align-items:center}
+}`;
+  document.head.appendChild(st);
 }
 
 /* Same person = same register number OR same name (a name match counts even if the register numbers differ) */
@@ -421,10 +456,10 @@ VIEWS.contributors = () => {
       // Project team defaults are part of the source code, so they are available
       // on every deployment/account even when this browser's IndexedDB is empty.
       const permanentTeam = [
-        { id: 'eer-team-shree-devi-s', kind: 'student', name: 'Shree Devi S', role: 'JavaScript', regNo: '25BCE5780', dept: 'CSE Core', desc: 'Integration & Deployment', order: 1 },
-        { id: 'eer-team-liya-ann-john', kind: 'student', name: 'Liya Ann John', role: 'DBMS Concepts & Schema Design', regNo: '25BCE5761', dept: 'CSE Core', desc: 'DBMS Concepts & Schema Design', order: 2 },
-        { id: 'eer-team-shreyashi-k', kind: 'student', name: 'Shreyashi K', role: 'Frontend & Visualization', regNo: '25BCE5744', dept: 'CSE Core', desc: 'Frontend & Visualization', order: 3 },
-        { id: 'eer-team-faculty-swaminathan-annadurai', kind: 'faculty', name: 'Dr. Swaminathan Annadurai', role: 'Faculty Mentor', desc: 'Project Guidance, Technical Mentorship and Review', order: 4 }
+        { id: 'eer-team-shree-devi-s', img: 'assets/contributors/student3.jpg', kind: 'student', name: 'Shree Devi S', role: 'JavaScript', regNo: '25BCE5780', dept: 'CSE Core', desc: 'Integration & Deployment', order: 1 },
+        { id: 'eer-team-liya-ann-john', img: 'assets/contributors/student2.jpg', kind: 'student', name: 'Liya Ann John', role: 'DBMS Concepts & Schema Design', regNo: '25BCE5761', dept: 'CSE Core', desc: 'DBMS Concepts & Schema Design', order: 2 },
+        { id: 'eer-team-shreyashi-k', img: 'assets/contributors/student1.jpg', kind: 'student', name: 'Shreyashi K', role: 'Frontend & Visualization', regNo: '25BCE5744', dept: 'CSE Core', desc: 'Frontend & Visualization', order: 3 },
+        { id: 'eer-team-faculty-swaminathan-annadurai', img: 'assets/contributors/faculty.jpg', kind: 'faculty', name: 'Dr. Swaminathan Annadurai', role: 'Faculty Mentor', desc: 'Project Guidance, Technical Mentorship and Review', order: 4 }
       ];
       for (const member of permanentTeam) {
         const matches = list.filter(c => c.id === member.id || ctSame(c, member));
@@ -448,7 +483,9 @@ VIEWS.contributors = () => {
     }
     catch (e) { root.innerHTML = `<div class="note warn">Contributor storage is not available in this browser (${esc(e.message || 'error')}), so contributors cannot be shown or saved here.</div>`; return; }
     if (!list.length) { root.innerHTML = `<div class="empty"><h3>No contributors have been added yet</h3><p>${DB.settings.editor ? 'Add the team in the content manager.' : 'Turn on editor mode in Settings, then open Admin → Contributors to add the team.'}</p>${DB.settings.editor ? '<a class="btn pri" href="#/admin/contributors">Add contributors</a>' : '<button class="btn pri" data-act="settings">Open Settings</button>'}</div>`; return; }
-    root.innerHTML = CT_KINDS.map(([k, label]) => { const g = list.filter(c => (c.kind || 'other') === k); return g.length ? `<div class="ct-group"><h3><span class="chip ${k === 'faculty' ? 'ok' : 'acc'}" style="font-size:13px;font-weight:600">${label}</span></h3><div class="ct-grid">${g.map(ctCardHTML).join('')}</div></div>` : ''; }).join('') + (DB.settings.editor ? '<p style="text-align:center"><a class="btn sm" href="#/admin/contributors">Manage contributors</a></p>' : '');
+    ctInjectStyle();
+    const ctGroup = (k, label, g) => g.length ? `<div class="ct2-group"><h3 class="ct2-h">${label}</h3><div class="${k === 'student' ? 'ct2-students' : k === 'faculty' ? 'ct2-facultywrap' : 'ct2-others'}">${g.map(ctCardHTML).join('')}</div></div>` : '';
+    root.innerHTML = `<div class="ct2-wrap">${CT_KINDS.map(([k, label]) => ctGroup(k, label, list.filter(c => (c.kind || 'other') === k))).join('')}</div>` + (DB.settings.editor ? '<p style="text-align:center"><a class="btn sm" href="#/admin/contributors">Manage contributors</a></p>' : '');
   };
   return `<div class="page-h" style="text-align:center;justify-content:center;margin-bottom:28px"><div style="max-width:700px"><span class="chip acc" style="margin-bottom:8px">Academic Project Team</span><h1 style="margin:0 0 8px;font-size:32px">CONTRIBUTORS</h1><p style="margin:0 auto">The people behind the EER Lab – Generalization &amp; Specialization Visualizer project.</p></div></div><div id="ct-root"><span class="muted small">Loading…</span></div>`;
 };
