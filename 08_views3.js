@@ -366,10 +366,52 @@ VIEWS.profile = () => {
 /* ---------- Contributors (dynamic: records + photos live in IndexedDB store "contrib", managed in Admin) ---------- */
 const CT_KINDS = [['student', 'Student Contributors'], ['faculty', 'Faculty Mentors'], ['other', 'Other Contributors']];
 const ctInitials = n => String(n || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
-const ctPhotoHTML = c => `<div class="ct-photo">${c.photo ? `<img src="${esc(c.photo)}" alt="${esc(c.name)}">` : esc(ctInitials(c.name))}</div>`;
+
+/* Show the saved image if it loads; otherwise fall back to initials. */
+function ctPhotoHTML(c) {
+  const initials = esc(ctInitials(c.name));
+  const name = esc(c.name || 'Contributor');
+  const photo = typeof c.photo === 'string' ? c.photo.trim() : '';
+
+  if (!photo) {
+    return `<div class="ct-photo"><div class="ct-initials" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
+  }
+
+  return `<div class="ct-photo"><img src="${esc(photo)}" alt="${name}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="ct-initials" style="display:none;align-items:center;justify-content:center;width:100%;height:100%">${initials}</div></div>`;
+}
+
 function ctCardHTML(c) {
   return `<div class="ct-card">${ctPhotoHTML(c)}<h3 style="margin:0">${esc(c.name)}</h3>${c.role ? `<p class="small"><b>${esc(c.role)}</b></p>` : ''}${c.regNo ? `<span class="chip acc">Register No: ${esc(c.regNo)}</span>` : ''}${c.dept ? `<span class="xs muted">${esc(c.dept)}</span>` : ''}${c.desc ? `<p class="small muted" style="margin-top:6px">${esc(c.desc)}</p>` : ''}</div>`;
 }
+
+/* Same person = same register number OR same name (a name match counts even if the register numbers differ) */
+function ctSame(a, b) {
+  const reg = x => String(x.regNo || '').trim().toLowerCase();
+  const nm = x => String(x.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (reg(a) && reg(b) && reg(a) === reg(b)) return true;
+  return !!nm(a) && nm(a) === nm(b);
+}
+/* Pick one record per person, keeping the one with a photo (else the first). Does not touch storage. */
+function ctDedupe(all) {
+  const out = [];
+  for (const c of all) {
+    const i = out.findIndex(x => x.id === c.id || ctSame(x, c));
+    if (i < 0) out.push(c);
+    else if (!(out[i].photo || '').trim() && (c.photo || '').trim()) out[i] = c;
+  }
+  return out;
+}
+/* Same as ctDedupe, but also deletes the duplicate records from IndexedDB. Returns the records that remain. */
+async function ctPurgeDuplicates() {
+  const all = await IDB.all('contrib');
+  const kept = ctDedupe(all);
+  const keptIds = new Set(kept.map(c => c.id));
+  for (const c of all) {
+    if (!keptIds.has(c.id)) await IDB.del(c.id, 'contrib');
+  }
+  return kept;
+}
+
 VIEWS.contributors = () => {
   MOUNT = async () => {
     const root = $('#ct-root'); if (!root) return;
@@ -384,11 +426,25 @@ VIEWS.contributors = () => {
         { id: 'eer-team-shreyashi-k', kind: 'student', name: 'Shreyashi K', role: 'Frontend & Visualization', regNo: '25BCE5744', dept: 'CSE Core', desc: 'Frontend & Visualization', order: 3 },
         { id: 'eer-team-faculty-swaminathan-annadurai', kind: 'faculty', name: 'Dr. Swaminathan Annadurai', role: 'Faculty Mentor', desc: 'Project Guidance, Technical Mentorship and Review', order: 4 }
       ];
-      const existingIds = new Set(list.map(c => c.id));
       for (const member of permanentTeam) {
-        if (!existingIds.has(member.id)) await IDB.put(member, 'contrib');
+        const matches = list.filter(c => c.id === member.id || ctSame(c, member));
+
+        if (matches.length === 0) {
+          await IDB.put(member, 'contrib');
+        } else {
+          // Prefer a record that already has an uploaded photo
+          const keep = matches.find(c => typeof c.photo === 'string' && c.photo.trim()) || matches[0];
+          const merged = { ...member, ...keep, id: keep.id, photo: keep.photo || '' };
+          await IDB.put(merged, 'contrib');
+
+          // Remove duplicate records
+          for (const duplicate of matches) {
+            if (duplicate.id !== keep.id) await IDB.del(duplicate.id, 'contrib');
+          }
+        }
+        list = await IDB.all('contrib');
       }
-      list = await IDB.all('contrib');
+      list = await ctPurgeDuplicates();
     }
     catch (e) { root.innerHTML = `<div class="note warn">Contributor storage is not available in this browser (${esc(e.message || 'error')}), so contributors cannot be shown or saved here.</div>`; return; }
     if (!list.length) { root.innerHTML = `<div class="empty"><h3>No contributors have been added yet</h3><p>${DB.settings.editor ? 'Add the team in the content manager.' : 'Turn on editor mode in Settings, then open Admin → Contributors to add the team.'}</p>${DB.settings.editor ? '<a class="btn pri" href="#/admin/contributors">Add contributors</a>' : '<button class="btn pri" data-act="settings">Open Settings</button>'}</div>`; return; }
@@ -1294,7 +1350,7 @@ VIEWS.admin = sec => {
 async function ctAdminList() {
   const box = $('#ct-admin-list'); if (!box) return;
   try {
-    const all = await IDB.all('contrib');
+    const all = await ctPurgeDuplicates();
     box.innerHTML = all.length ? all.map(c => { const same = all.filter(x => (x.kind || 'other') === (c.kind || 'other')), pos = same.indexOf(c);
       return `<div class="ct-row">${ctPhotoHTML(c)}<div style="flex:1;min-width:0"><b>${esc(c.name)}</b> <span class="chip">${esc((CT_KINDS.find(k => k[0] === c.kind) || ['', 'Other'])[1].replace(/s$/, ''))}</span><div class="xs muted">${esc([c.role, c.regNo, c.dept].filter(Boolean).join(' · '))}</div></div><div class="row"><button class="btn xs" data-act="ct-move" data-id="${c.id}" data-d="-1" ${pos === 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button class="btn xs" data-act="ct-move" data-id="${c.id}" data-d="1" ${pos === same.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button><button class="btn xs" data-act="ct-edit" data-id="${c.id}">Edit</button><button class="btn xs danger" data-act="ct-del" data-id="${c.id}">Delete</button></div></div>`; }).join('') : '<div class="empty">No contributors yet. Use the form above to add the first one.</div>';
   } catch (e) { box.innerHTML = `<div class="note warn">Contributor storage is not available in this browser (${esc(e.message || 'error')}).</div>`; }
@@ -1589,4 +1645,3 @@ function boot() {
   window.addEventListener('hashchange', route);
   route();
 }
-
