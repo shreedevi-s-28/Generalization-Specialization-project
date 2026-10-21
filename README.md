@@ -1,6 +1,6 @@
 # EER Lab — Generalization & Specialization Visualizer
 
-**Live Demo:** https://eer-lab-demo.netlify.app/#/contributors
+**Live Demo:** eer-lab-demo.netlify.app
 
 EER Lab is an interactive, browser-based learning platform for the Enhanced Entity-Relationship (EER) model. It helps students understand superclass/subclass hierarchies, generalization, specialization, inheritance, and constraints such as disjoint/overlapping and total/partial participation.
 
@@ -96,7 +96,7 @@ Contributor information is managed dynamically through **Admin → Contributors*
 
 Explore the application:
 
-**https://eer-lab-demo.netlify.app/#/home**
+**eer-lab-demo.netlify.app**
 
 The Netlify deployment serves the static application. Core browser-based features can run without a backend, while AI diagram recognition requires a separately running and configured Python server.
 
